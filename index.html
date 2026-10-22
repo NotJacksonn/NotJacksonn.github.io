@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV Screen</title>
+<link href="https://fonts.googleapis.com/css?family=Quicksand:300,500|Creepster&display=swap" rel="stylesheet">
+<!--
+  TV Screen: an always-on Halloween / fall display that runs entirely in the TV's web browser.
+  Written in old-style JavaScript (ES5) so 2015-era TV browsers can run it.
+
+  Change things in SETTINGS below, or add them to the address, for example:
+    index.html?city=Chicago          weather for a city
+    index.html?mode=night            force one mode (night, morning or normal) to try it out
+    index.html?units=celsius&clock=24
+-->
+<script>
+var SETTINGS = {
+  city: "Crofton, Maryland", // e.g. "Chicago" or "Austin, Texas" (weather is hidden when empty)
+  units: "fahrenheit",      // or "celsius"
+  clock24: false,
+  modes: [
+    { name: "night",   from: "22:00", to: "07:00" },
+    { name: "morning", from: "07:00", to: "12:00" },
+    { name: "normal",  from: "12:00", to: "22:00" }
+  ],
+  messages: {
+    night:   ["Sweet dreams", "{halloween}", "Rest easy, the pumpkins are on watch"],
+    morning: ["Good morning", "Happy fall, y'all", "{halloween}", "Grab something warm to drink"],
+    normal:  ["Happy Halloween!", "{halloween}", "Trick or treat", "Something wicked this way comes"]
+  },
+  messageSeconds: 20,
+  // Optional music for each mode: links to mp3 files, played in order and looped.
+  music: { night: [], morning: [], normal: [] },
+  musicVolume: 0.5
+};
+</script>
+<style>
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; cursor: none; }
+body { font-family: 'Quicksand', 'Segoe UI', Arial, sans-serif; color: #fff; }
+.scene { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; overflow: hidden;
+  -webkit-transition: opacity 4s ease; transition: opacity 4s ease; }
+.scene.on { opacity: 1; }
+.scene svg.decor { position: absolute; left: 0; bottom: 0; width: 100%; height: 100%; }
+.fx { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.fx > * { position: absolute; top: 0; left: 0; -webkit-transform-origin: 50% 50%; transform-origin: 50% 50%; }
+
+#night { background: #0a0720;
+  background: -webkit-linear-gradient(top, #05041a 0%, #150d33 55%, #2a1740 100%);
+  background: linear-gradient(to bottom, #05041a 0%, #150d33 55%, #2a1740 100%); }
+#morning { background: #f2b766;
+  background: -webkit-linear-gradient(top, #f7d9a0 0%, #f2b766 40%, #e08a45 75%, #c4622f 100%);
+  background: linear-gradient(to bottom, #f7d9a0 0%, #f2b766 40%, #e08a45 75%, #c4622f 100%); }
+#normal { background: #2a0f22;
+  background: -webkit-linear-gradient(top, #0d0614 0%, #2a0f2a 45%, #7a2a1c 78%, #d4581a 100%);
+  background: linear-gradient(to bottom, #0d0614 0%, #2a0f2a 45%, #7a2a1c 78%, #d4581a 100%); }
+
+.star { width: 0.35rem; height: 0.35rem; border-radius: 50%; background: #fff;
+  -webkit-animation: twinkle 5s ease-in-out infinite; animation: twinkle 5s ease-in-out infinite; }
+@-webkit-keyframes twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.9; } }
+@keyframes twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.9; } }
+
+.fog { position: absolute; left: -40%; width: 180%; height: 22%;
+  background: -webkit-radial-gradient(center, ellipse, rgba(190, 180, 230, 0.16) 0%, rgba(190, 180, 230, 0) 70%);
+  background: radial-gradient(ellipse at center, rgba(190, 180, 230, 0.16) 0%, rgba(190, 180, 230, 0) 70%);
+  -webkit-animation: drift 70s ease-in-out infinite alternate; animation: drift 70s ease-in-out infinite alternate; }
+@-webkit-keyframes drift { from { -webkit-transform: translateX(-12%); } to { -webkit-transform: translateX(12%); } }
+@keyframes drift { from { transform: translateX(-12%); } to { transform: translateX(12%); } }
+
+.flicker { -webkit-animation: flicker 3.2s ease-in-out infinite; animation: flicker 3.2s ease-in-out infinite; }
+@-webkit-keyframes flicker { 0%, 100% { opacity: 1; } 30% { opacity: 0.75; } 45% { opacity: 0.95; } 70% { opacity: 0.7; } }
+@keyframes flicker { 0%, 100% { opacity: 1; } 30% { opacity: 0.75; } 45% { opacity: 0.95; } 70% { opacity: 0.7; } }
+
+#hud { position: absolute; left: 0; width: 100%; top: 50%; text-align: center;
+  -webkit-transform: translateY(-58%); transform: translateY(-58%);
+  -webkit-transition: color 4s ease; transition: color 4s ease; }
+#clock { font-size: 22rem; font-weight: 300; line-height: 1; letter-spacing: -0.3rem; }
+#date { font-size: 6.2rem; font-weight: 500; margin-top: 1rem; opacity: 0.92; }
+#weather { font-size: 5rem; font-weight: 500; margin-top: 2.4rem; opacity: 0.9; display: none; }
+#weather svg { width: 6.4rem; height: 6.4rem; vertical-align: -1.6rem; margin-right: 1.2rem; }
+#message { position: absolute; left: 0; width: 100%; bottom: 7rem; text-align: center; font-size: 6rem;
+  -webkit-transition: opacity 1.2s ease; transition: opacity 1.2s ease; }
+
+body.night #hud, body.night #message { color: #e8e1ff; text-shadow: 0 0 2.4rem rgba(140, 110, 255, 0.35); }
+body.night #clock { font-weight: 300; }
+body.morning #hud, body.morning #message { color: #fffaf2; text-shadow: 0 0.2rem 0.6rem rgba(110, 40, 5, 0.6), 0 0.4rem 2.4rem rgba(110, 40, 5, 0.55); }
+body.normal #hud { color: #ffe9d2; text-shadow: 0 0 3rem rgba(255, 110, 20, 0.45); }
+body.normal #message { color: #ff8a1f; font-family: 'Creepster', 'Quicksand', Arial, sans-serif; font-size: 8rem;
+  letter-spacing: 0.3rem; text-shadow: 0 0 2rem rgba(255, 90, 0, 0.6); }
+</style>
+</head>
+<body class="night">
+
+<!-- NIGHT: calm moonlit fall night -->
+<div class="scene" id="night">
+  <div class="fx" id="night-stars"></div>
+  <svg class="decor" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMax slice">
+    <defs>
+      <radialGradient id="moonGlow"><stop offset="0%" stop-color="#d8ccff" stop-opacity="0.45"/><stop offset="100%" stop-color="#d8ccff" stop-opacity="0"/></radialGradient>
+    </defs>
+    <circle cx="1520" cy="230" r="300" fill="url(#moonGlow)"/>
+    <circle cx="1520" cy="230" r="105" fill="#f3ecd6"/>
+    <circle cx="1490" cy="205" r="18" fill="#e3d9bb"/><circle cx="1555" cy="260" r="13" fill="#e3d9bb"/><circle cx="1540" cy="190" r="9" fill="#e3d9bb"/>
+    <path d="M0 860 Q260 790 560 850 T1180 840 T1920 820 L1920 1080 L0 1080 Z" fill="#1a1030"/>
+    <path d="M0 940 Q380 880 760 930 T1500 920 T1920 930 L1920 1080 L0 1080 Z" fill="#0c0718"/>
+    <g stroke="#0c0718" stroke-linecap="round" fill="none">
+      <path d="M210 1080 L230 760" stroke-width="26"/><path d="M226 840 L150 740" stroke-width="12"/><path d="M228 800 L300 700" stroke-width="12"/>
+      <path d="M160 750 L120 700" stroke-width="6"/><path d="M290 712 L340 680" stroke-width="6"/><path d="M230 770 L240 680" stroke-width="9"/>
+      <path d="M1760 1080 L1745 820" stroke-width="20"/><path d="M1748 880 L1690 800" stroke-width="9"/><path d="M1747 850 L1800 780" stroke-width="9"/>
+    </g>
+  </svg>
+  <div class="fog" style="top:68%"></div>
+  <div class="fog" style="top:78%; -webkit-animation-duration: 95s; animation-duration: 95s;"></div>
+  <div class="fx" id="night-fx"></div>
+</div>
+
+<!-- MORNING: warm fall sunrise -->
+<div class="scene" id="morning">
+  <svg class="decor" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMax slice">
+    <defs>
+      <radialGradient id="sunGlow"><stop offset="0%" stop-color="#fff6d6" stop-opacity="0.85"/><stop offset="100%" stop-color="#ffd38a" stop-opacity="0"/></radialGradient>
+    </defs>
+    <circle cx="1480" cy="300" r="420" fill="url(#sunGlow)"/>
+    <circle cx="1480" cy="300" r="120" fill="#fff4cf" opacity="0.95"/>
+    <path d="M0 840 Q320 760 680 830 T1360 810 T1920 790 L1920 1080 L0 1080 Z" fill="#c45a26"/>
+    <path d="M0 910 Q420 850 860 900 T1600 890 T1920 900 L1920 1080 L0 1080 Z" fill="#963d1a"/>
+    <g>
+      <rect x="236" y="800" width="16" height="120" fill="#5a2a12"/><circle cx="244" cy="770" r="70" fill="#e0731f"/><circle cx="205" cy="800" r="45" fill="#c8481c"/>
+      <rect x="436" y="830" width="12" height="90" fill="#5a2a12"/><circle cx="442" cy="810" r="50" fill="#e9a520"/>
+      <rect x="1636" y="790" width="16" height="120" fill="#5a2a12"/><circle cx="1644" cy="760" r="72" fill="#b8361a"/><circle cx="1690" cy="790" r="42" fill="#e0731f"/>
+      <rect x="1826" y="820" width="12" height="90" fill="#5a2a12"/><circle cx="1832" cy="800" r="48" fill="#e9a520"/>
+    </g>
+    <path d="M0 980 Q520 930 1000 975 T1920 965 L1920 1080 L0 1080 Z" fill="#6a2a12"/>
+  </svg>
+  <div class="fx" id="morning-fx"></div>
+</div>
+
+<!-- NORMAL: Halloween -->
+<div class="scene" id="normal">
+  <svg class="decor" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMax slice">
+    <defs>
+      <radialGradient id="harvestGlow"><stop offset="0%" stop-color="#ffb35a" stop-opacity="0.55"/><stop offset="100%" stop-color="#ff7a1a" stop-opacity="0"/></radialGradient>
+      <radialGradient id="pumpkinLight"><stop offset="0%" stop-color="#ffd25a" stop-opacity="0.7"/><stop offset="100%" stop-color="#ff8a1f" stop-opacity="0"/></radialGradient>
+    </defs>
+    <circle cx="420" cy="330" r="330" fill="url(#harvestGlow)"/>
+    <circle cx="420" cy="330" r="135" fill="#ffb054"/>
+    <circle cx="380" cy="300" r="22" fill="#f29a3e"/><circle cx="460" cy="370" r="16" fill="#f29a3e"/>
+    <path d="M0 880 Q300 820 640 870 T1300 860 T1920 840 L1920 1080 L0 1080 Z" fill="#14070f"/>
+    <!-- haunted house -->
+    <g fill="#0a0408">
+      <path d="M1380 870 L1380 640 L1470 560 L1560 640 L1560 870 Z"/>
+      <path d="M1560 870 L1560 700 L1700 700 L1700 870 Z"/><path d="M1550 705 L1630 630 L1710 705 Z"/>
+      <path d="M1440 600 L1440 520 L1462 520 L1462 580 Z"/>
+    </g>
+    <g class="flicker" fill="#ffb347">
+      <rect x="1420" y="680" width="34" height="46"/><rect x="1490" y="680" width="34" height="46"/>
+      <rect x="1600" y="740" width="30" height="40"/><circle cx="1470" cy="620" r="14"/>
+    </g>
+    <!-- bare tree -->
+    <g stroke="#0a0408" stroke-linecap="round" fill="none">
+      <path d="M1080 1080 C1090 960 1060 880 1100 780" stroke-width="30"/>
+      <path d="M1096 820 C1040 780 1010 740 960 720" stroke-width="12"/><path d="M1100 790 C1150 740 1190 720 1250 700" stroke-width="12"/>
+      <path d="M990 730 L950 680" stroke-width="6"/><path d="M1210 712 L1240 660" stroke-width="6"/><path d="M1100 790 L1110 690" stroke-width="9"/>
+    </g>
+    <!-- tombstones -->
+    <g fill="#1c1018">
+      <path d="M640 930 L640 870 Q670 830 700 870 L700 930 Z"/><path d="M760 940 L760 890 Q785 860 810 890 L810 940 Z"/>
+      <rect x="560" y="880" width="14" height="60"/><rect x="545" y="895" width="44" height="12"/>
+    </g>
+    <path d="M0 960 Q480 920 980 955 T1920 945 L1920 1080 L0 1080 Z" fill="#070306"/>
+    <!-- pumpkins -->
+    <g transform="translate(160,900)">
+      <circle class="flicker" cx="60" cy="60" r="120" fill="url(#pumpkinLight)"/>
+      <rect x="54" y="0" width="12" height="20" rx="4" fill="#3d5a1e"/>
+      <ellipse cx="60" cy="62" rx="62" ry="48" fill="#e8711a"/><ellipse cx="60" cy="62" rx="30" ry="48" fill="#f2862c"/>
+      <g class="flicker" fill="#ffd25a"><path d="M30 50 L44 36 L50 56 Z"/><path d="M90 50 L76 36 L70 56 Z"/><path d="M28 72 L40 80 L50 72 L60 82 L70 72 L80 80 L92 72 L80 96 L40 96 Z"/></g>
+    </g>
+    <g transform="translate(330,930) scale(0.7)">
+      <circle class="flicker" cx="60" cy="60" r="120" fill="url(#pumpkinLight)"/>
+      <rect x="54" y="0" width="12" height="20" rx="4" fill="#3d5a1e"/>
+      <ellipse cx="60" cy="62" rx="62" ry="48" fill="#d9621a"/><ellipse cx="60" cy="62" rx="30" ry="48" fill="#ea7a26"/>
+      <g class="flicker" fill="#ffd25a"><path d="M34 46 L46 46 L40 60 Z"/><path d="M74 46 L86 46 L80 60 Z"/><path d="M34 76 Q60 98 86 76 Q60 86 34 76 Z"/></g>
+    </g>
+    <g transform="translate(1720,905) scale(0.85)">
+      <circle class="flicker" cx="60" cy="60" r="120" fill="url(#pumpkinLight)"/>
+      <rect x="54" y="0" width="12" height="20" rx="4" fill="#3d5a1e"/>
+      <ellipse cx="60" cy="62" rx="62" ry="48" fill="#e8711a"/><ellipse cx="60" cy="62" rx="30" ry="48" fill="#f2862c"/>
+      <g class="flicker" fill="#ffd25a"><path d="M32 54 L46 40 L52 58 Z"/><path d="M88 54 L74 40 L68 58 Z"/><path d="M30 74 L90 74 L60 98 Z"/></g>
+    </g>
+  </svg>
+  <div class="fx" id="normal-fx"></div>
+</div>
+
+<div id="hud">
+  <div id="clock"></div>
+  <div id="date"></div>
+  <div id="weather"></div>
+</div>
+<div id="message"></div>
+<audio id="player"></audio>
+
+<script>
+(function () {
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var LEAF = "M50 4 L58 30 L82 18 L73 42 L97 46 L76 58 L84 77 L60 69 L54 94 L50 82 L46 94 L40 69 L16 77 L24 58 L3 46 L27 42 L18 18 L42 30 Z";
+  var BAT = "M50 14 C47 8 44 8 43 12 C36 4 22 2 8 10 C16 12 20 18 18 24 C24 20 30 22 33 28 C38 22 44 24 50 30 C56 24 62 22 67 28 C70 22 76 20 82 24 C80 18 84 12 92 10 C78 2 64 4 57 12 C56 8 53 8 50 14 Z";
+  var MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+
+  // ---------- settings from the address bar
+  function param(name) {
+    var m = new RegExp("[?&]" + name + "=([^&]*)").exec(window.location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : null;
+  }
+  if (param("city")) SETTINGS.city = param("city");
+  if (param("units")) SETTINGS.units = param("units");
+  if (param("clock") === "24") SETTINGS.clock24 = true;
+  var forcedMode = param("mode");
+
+  // ---------- size everything from the screen (1rem = 10px on a 1080p screen)
+  function resize() {
+    var unit = Math.min(window.innerWidth / 1920, window.innerHeight / 1080) * 10;
+    document.documentElement.style.fontSize = unit + "px";
+  }
+  resize();
+  window.onresize = resize;
+
+  function $(id) { return document.getElementById(id); }
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function setTransform(el, t) { el.style.webkitTransform = t; el.style.transform = t; }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+  function toMinutes(hhmm) { var p = hhmm.split(":"); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); }
+
+  // ---------- modes
+  function modeFor(d) {
+    if (forcedMode) return forcedMode;
+    var now = d.getHours() * 60 + d.getMinutes();
+    for (var i = 0; i < SETTINGS.modes.length; i++) {
+      var m = SETTINGS.modes[i], from = toMinutes(m.from), to = toMinutes(m.to);
+      if (from <= to ? (now >= from && now < to) : (now >= from || now < to)) return m.name;
+    }
+    return SETTINGS.modes[0].name;
+  }
+
+  // ---------- particles (leaves and bats)
+  var W = 1920, H = 1080, scale = 1;
+  var effects = {
+    night:   { leaves: 7,  leafColors: ["#8a4a2a", "#6b3446", "#9a6a3a", "#5a3a5a"], leafSpeed: [28, 48], bats: 2, batSpeed: [70, 110] },
+    morning: { leaves: 16, leafColors: ["#e8711a", "#c0392b", "#f1b80f", "#d35400", "#a83a12"], leafSpeed: [60, 115], bats: 0 },
+    normal:  { leaves: 5,  leafColors: ["#e8711a", "#7a3410", "#c0392b"], leafSpeed: [50, 90], bats: 7, batSpeed: [110, 210] }
+  };
+  var particles = [];
+
+  function makeShape(path, color, w, h, viewW, viewH) {
+    var svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + viewW + " " + viewH);
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+    var p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("d", path);
+    p.setAttribute("fill", color);
+    svg.appendChild(p);
+    return svg;
+  }
+
+  function resetLeaf(p, anywhere) {
+    p.x = rand(-50, W + 50);
+    p.y = anywhere ? rand(-H, H) : rand(-300, -80) ;
+    p.vy = rand(p.cfg.leafSpeed[0], p.cfg.leafSpeed[1]);
+    p.sway = rand(30, 90); p.freq = rand(0.4, 1.1); p.phase = rand(0, 6.28);
+    p.rot = rand(0, 360); p.vrot = rand(-60, 60); p.s = rand(0.55, 1.1);
+  }
+
+  function resetBat(p, anywhere) {
+    p.dir = Math.random() < 0.5 ? 1 : -1;
+    p.x = anywhere ? rand(0, W) : (p.dir > 0 ? rand(-900, -150) : rand(W + 150, W + 900));
+    p.baseY = rand(H * 0.06, H * 0.5);
+    p.vx = rand(p.cfg.batSpeed[0], p.cfg.batSpeed[1]) * p.dir;
+    p.bob = rand(15, 45); p.freq = rand(0.8, 1.6); p.phase = rand(0, 6.28); p.s = rand(0.5, 1.0);
+  }
+
+  function buildEffects(mode) {
+    var layer = $(mode + "-fx"), cfg = effects[mode], i, p;
+    if (!layer || !cfg) return;
+    for (i = 0; i < cfg.leaves; i++) {
+      p = { kind: "leaf", cfg: cfg, el: makeShape(LEAF, pick(cfg.leafColors), 60, 60, 100, 100) };
+      layer.appendChild(p.el); resetLeaf(p, true); particles.push(p);
+    }
+    for (i = 0; i < cfg.bats; i++) {
+      p = { kind: "bat", cfg: cfg, el: makeShape(BAT, "#0b050c", 140, 56, 100, 40) };
+      layer.appendChild(p.el); resetBat(p, true); particles.push(p);
+    }
+  }
+
+  function clearEffects() {
+    for (var i = 0; i < particles.length; i++) {
+      if (particles[i].el.parentNode) particles[i].el.parentNode.removeChild(particles[i].el);
+    }
+    particles = [];
+  }
+
+  var lastFrame = 0, t = 0;
+  var raf = window.requestAnimationFrame || window.webkitRequestAnimationFrame ||
+            function (cb) { return setTimeout(function () { cb(new Date().getTime()); }, 40); };
+  function frame(now) {
+    now = now || new Date().getTime();
+    var dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0;
+    lastFrame = now; t += dt;
+    W = window.innerWidth; H = window.innerHeight; scale = H / 1080;
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      if (p.kind === "leaf") {
+        p.y += p.vy * scale * dt; p.rot += p.vrot * dt;
+        if (p.y > H + 80) resetLeaf(p, false);
+        var x = p.x + Math.sin(t * p.freq + p.phase) * p.sway * scale;
+        setTransform(p.el, "translate3d(" + x.toFixed(1) + "px," + p.y.toFixed(1) + "px,0) rotate(" + p.rot.toFixed(1) + "deg) scale(" + (p.s * scale).toFixed(3) + ")");
+      } else {
+        p.x += p.vx * scale * dt;
+        if ((p.dir > 0 && p.x > W + 200) || (p.dir < 0 && p.x < -200)) resetBat(p, false);
+        var y = p.baseY + Math.sin(t * p.freq + p.phase) * p.bob * scale;
+        var flap = 0.55 + 0.45 * Math.abs(Math.sin(t * 9 + p.phase));
+        setTransform(p.el, "translate3d(" + p.x.toFixed(1) + "px," + y.toFixed(1) + "px,0) scale(" + (p.s * scale * p.dir).toFixed(3) + "," + (p.s * scale * flap).toFixed(3) + ")");
+      }
+    }
+    raf(frame);
+  }
+
+  // ---------- stars for the night sky
+  (function () {
+    var sky = $("night-stars");
+    for (var i = 0; i < 70; i++) {
+      var s = document.createElement("div");
+      s.className = "star";
+      s.style.left = rand(0, 100) + "%";
+      s.style.top = rand(0, 62) + "%";
+      s.style.webkitAnimationDelay = s.style.animationDelay = rand(0, 5) + "s";
+      var size = rand(0.2, 0.45) + "rem";
+      s.style.width = s.style.height = size;
+      sky.appendChild(s);
+    }
+  })();
+
+  // ---------- clock, date, messages
+  function formatTime(d) {
+    if (SETTINGS.clock24) return pad(d.getHours()) + ":" + pad(d.getMinutes());
+    var h = d.getHours() % 12 || 12;
+    return h + ":" + pad(d.getMinutes()) + " " + (d.getHours() < 12 ? "AM" : "PM");
+  }
+
+  function halloweenText(d) {
+    var target = new Date(d.getFullYear(), 9, 31);
+    var today = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    var days = Math.round((target - today) / 86400000);
+    if (days === 0) return "Happy Halloween!";
+    if (days < 0) return "Happy fall!";
+    return days === 1 ? "1 day until Halloween" : days + " days until Halloween";
+  }
+
+  var currentMode = null, shownTime = "", shownDate = "", messageIndex = -1;
+
+  function showMessage(d, force) {
+    var list = SETTINGS.messages[currentMode] || [""];
+    var idx = Math.floor(d.getTime() / 1000 / SETTINGS.messageSeconds) % list.length;
+    if (idx === messageIndex && !force) return;
+    messageIndex = idx;
+    var text = list[idx].replace("{halloween}", halloweenText(d));
+    var el = $("message");
+    el.style.opacity = 0;
+    setTimeout(function () { el.innerHTML = ""; el.appendChild(document.createTextNode(text)); el.style.opacity = 1; }, 1200);
+  }
+
+  function applyMode(mode) {
+    currentMode = mode;
+    document.body.className = mode;
+    var scenes = ["night", "morning", "normal"];
+    for (var i = 0; i < scenes.length; i++) $(scenes[i]).className = "scene" + (scenes[i] === mode ? " on" : "");
+    clearEffects();
+    buildEffects(mode);
+    playMusic(mode);
+    showWeather();
+  }
+
+  function tick() {
+    var d = new Date();
+    var mode = modeFor(d);
+    if (mode !== currentMode) { applyMode(mode); showMessage(d, true); }
+    var time = formatTime(d);
+    if (time !== shownTime) { shownTime = time; $("clock").innerHTML = time; }
+    var date = DAYS[d.getDay()] + ", " + MONTHS[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+    if (date !== shownDate) { shownDate = date; $("date").innerHTML = date; }
+    showMessage(d, false);
+  }
+
+  // ---------- music
+  var playlist = [], track = 0;
+  function playMusic(mode) {
+    var player = $("player");
+    playlist = (SETTINGS.music[mode] || []).slice(0);
+    track = 0;
+    if (!playlist.length) { player.pause(); return; }
+    player.volume = SETTINGS.musicVolume;
+    player.src = playlist[0];
+    try { player.play(); } catch (e) {}
+  }
+  $("player").addEventListener("ended", function () {
+    if (!playlist.length) return;
+    track = (track + 1) % playlist.length;
+    this.src = playlist[track];
+    try { this.play(); } catch (e) {}
+  }, false);
+
+  // ---------- weather (Open-Meteo, free, no key)
+  var weather = null, place = null;
+  function getJSON(url, done) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      if (xhr.status === 200) { try { done(JSON.parse(xhr.responseText)); } catch (e) {} }
+    };
+    xhr.send();
+  }
+
+  var WEATHER = [
+    [[0], "Clear", "sun"], [[1], "Mostly clear", "sun"], [[2], "Partly cloudy", "partly"], [[3], "Cloudy", "cloud"],
+    [[45, 48], "Foggy", "fog"], [[51, 53, 55, 56, 57], "Drizzle", "rain"], [[61, 63, 65, 66, 67, 80, 81, 82], "Rain", "rain"],
+    [[71, 73, 75, 77, 85, 86], "Snow", "snow"], [[95, 96, 99], "Thunderstorms", "storm"]
+  ];
+  function describe(code) {
+    for (var i = 0; i < WEATHER.length; i++) for (var j = 0; j < WEATHER[i][0].length; j++) if (WEATHER[i][0][j] === code) return WEATHER[i];
+    return [[], "", "cloud"];
+  }
+  function icon(kind, night) {
+    var c = '<ellipse cx="54" cy="58" rx="30" ry="18" fill="currentColor"/><circle cx="40" cy="50" r="16" fill="currentColor"/><circle cx="60" cy="42" r="20" fill="currentColor"/>';
+    var sun = night ? '<circle cx="40" cy="38" r="22" fill="currentColor"/><circle cx="50" cy="32" r="20" fill="#000" opacity="0.55"/>'
+                    : '<circle cx="40" cy="38" r="18" fill="currentColor"/><g stroke="currentColor" stroke-width="5" stroke-linecap="round"><path d="M40 8v8M40 60v8M10 38h8M62 38h8M19 17l6 6M55 53l6 6M19 59l6-6M55 23l6-6"/></g>';
+    var body = {
+      sun: sun, cloud: c, partly: sun + '<g opacity="0.95">' + c + '</g>',
+      rain: c + '<g stroke="currentColor" stroke-width="5" stroke-linecap="round"><path d="M36 82l-4 10M52 82l-4 10M68 82l-4 10"/></g>',
+      snow: c + '<g fill="currentColor"><circle cx="36" cy="88" r="4"/><circle cx="52" cy="92" r="4"/><circle cx="68" cy="88" r="4"/></g>',
+      storm: c + '<path d="M54 72l-10 16h10l-6 12 16-20h-10l6-8z" fill="#ffd25a"/>',
+      fog: '<g stroke="currentColor" stroke-width="6" stroke-linecap="round"><path d="M14 40h72M22 56h60M14 72h72"/></g>'
+    }[kind];
+    return '<svg viewBox="0 0 100 100">' + body + '</svg>';
+  }
+  function showWeather() {
+    var el = $("weather");
+    if (!weather) { el.style.display = "none"; return; }
+    var w = describe(weather.code), u = SETTINGS.units === "celsius" ? "C" : "F";
+    el.innerHTML = icon(w[2], currentMode === "night") + Math.round(weather.temp) + "&deg;" + u + " &nbsp;" + w[1] +
+      " &nbsp;&middot;&nbsp; H " + Math.round(weather.high) + "&deg; &nbsp;L " + Math.round(weather.low) + "&deg;";
+    el.style.display = "block";
+  }
+  function loadWeather() {
+    if (!SETTINGS.city) return;
+    if (!place) {
+      var name = SETTINGS.city.split(",")[0];
+      getJSON("https://geocoding-api.open-meteo.com/v1/search?count=10&language=en&format=json&name=" + encodeURIComponent(name), function (data) {
+        if (!data.results || !data.results.length) return;
+        var want = SETTINGS.city.toLowerCase(), best = data.results[0];
+        for (var i = 0; i < data.results.length; i++) {
+          var r = data.results[i];
+          if (want.indexOf(", ") > 0 && ((r.admin1 && want.indexOf(r.admin1.toLowerCase()) > 0) || (r.country && want.indexOf(r.country.toLowerCase()) > 0))) { best = r; break; }
+        }
+        place = best;
+        loadWeather();
+      });
+      return;
+    }
+    getJSON("https://api.open-meteo.com/v1/forecast?latitude=" + place.latitude + "&longitude=" + place.longitude +
+      "&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto&temperature_unit=" +
+      (SETTINGS.units === "celsius" ? "celsius" : "fahrenheit"), function (data) {
+        weather = { temp: data.current.temperature_2m, code: data.current.weather_code,
+                    high: data.daily.temperature_2m_max[0], low: data.daily.temperature_2m_min[0] };
+        showWeather();
+      });
+  }
+
+  // ---------- start
+  tick();
+  setInterval(tick, 1000);
+  raf(frame);
+  loadWeather();
+  setInterval(loadWeather, 15 * 60 * 1000);
+  // Reload once a day in the small hours so a long-running TV browser stays fresh.
+  setInterval(function () { var d = new Date(); if (d.getHours() === 4 && d.getMinutes() === 0) window.location.reload(); }, 60000);
+})();
+</script>
+</body>
+</html>
